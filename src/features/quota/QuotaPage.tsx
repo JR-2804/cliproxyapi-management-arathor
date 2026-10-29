@@ -52,6 +52,7 @@ import type { QuotaProviderType } from './providers/types';
 import { useDevinQuotaAutoLoad } from './providers/devin/useDevinQuotaAutoLoad';
 import { useQuotaActions } from './hooks/useQuotaActions';
 import { useQuotaBatchLoader } from './hooks/useQuotaBatchLoader';
+import { useQuotaAutoRefresh } from './hooks/useQuotaAutoRefresh';
 import { readQuotaUiState, writeQuotaUiState } from './uiState';
 import styles from './QuotaPage.module.scss';
 
@@ -302,6 +303,19 @@ export function QuotaPage() {
       void loadQuota(pageItems);
     }
   }, [disableControls, error, filesGeneration, loading, loadQuota, pageItems, sessionGeneration]);
+
+  useQuotaAutoRefresh(
+    pageItems,
+    disableControls ||
+      loading ||
+      batchLoading ||
+      confirmationOpen ||
+      resettingQuotaName !== null ||
+      Boolean(error) ||
+      filesGeneration !== sessionGeneration,
+    getQuota,
+    loadQuota
+  );
 
   useDevinQuotaAutoLoad(
     pageItems,

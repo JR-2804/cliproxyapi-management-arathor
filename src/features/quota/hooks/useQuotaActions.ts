@@ -15,6 +15,7 @@ import type { AuthFileItem } from '@/types';
 import { getStatusFromError } from '@/utils/quota';
 import { getQuotaCacheKey } from '@/utils/quota/identity';
 import { enrichQuotaInBackground } from '../quotaEnrichment';
+import { isQuotaRequestPending } from '../autoRefresh';
 import { getQuotaMap, getQuotaSetter, type QuotaAdapter, type QuotaCardState } from '../providers';
 
 const getQuotaState = (adapter: QuotaAdapter, file: AuthFileItem): QuotaCardState | undefined =>
@@ -31,19 +32,20 @@ export function useQuotaActions(disableControls: boolean) {
       if (disableControls || file.disabled) return;
       const cacheKey = getQuotaCacheKey(file);
       if (resettingQuotaName === cacheKey) return;
-      if (getQuotaState(adapter, file)?.status === 'loading') return;
+      if (isQuotaRequestPending(getQuotaState(adapter, file))) return;
       const cacheGeneration = captureQuotaCacheGeneration(file.name);
       const setQuota = getQuotaSetter(adapter);
+      const checkedAt = Date.now();
 
       setQuota((prev) => ({
         ...prev,
-        [cacheKey]: adapter.buildLoadingState(),
+        [cacheKey]: { ...adapter.buildLoadingState(), checkedAt },
       }));
 
       try {
         const data = await adapter.fetchQuota(file, t);
         commitIfQuotaCacheCurrent(cacheGeneration, () => {
-          const successState = adapter.buildSuccessState(data);
+          const successState = { ...adapter.buildSuccessState(data), checkedAt };
           setQuota((prev) => ({
             ...prev,
             [cacheKey]: successState,
@@ -57,7 +59,7 @@ export function useQuotaActions(disableControls: boolean) {
         commitIfQuotaCacheCurrent(cacheGeneration, () => {
           setQuota((prev) => ({
             ...prev,
-            [cacheKey]: adapter.buildErrorState(message, status),
+            [cacheKey]: { ...adapter.buildErrorState(message, status), checkedAt },
           }));
           showNotification(
             t('auth_files.quota_refresh_failed', { name: file.name, message }),
@@ -75,7 +77,7 @@ export function useQuotaActions(disableControls: boolean) {
       if (!resetQuotaFn) return;
       if (disableControls || file.disabled) return;
       const cacheKey = getQuotaCacheKey(file);
-      if (getQuotaState(adapter, file)?.status === 'loading') return;
+      if (isQuotaRequestPending(getQuotaState(adapter, file))) return;
       if (resettingQuotaName === cacheKey) return;
 
       showConfirmation({
@@ -92,7 +94,7 @@ export function useQuotaActions(disableControls: boolean) {
             commitIfQuotaCacheCurrent(cacheGeneration, () => {
               setQuota((prev) => ({
                 ...prev,
-                [cacheKey]: adapter.buildSuccessState(data),
+                [cacheKey]: { ...adapter.buildSuccessState(data), checkedAt: Date.now() },
               }));
               showNotification(t('codex_quota.reset_success', { name: file.name }), 'success');
             });

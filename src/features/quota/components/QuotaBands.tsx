@@ -131,7 +131,7 @@ export function QuotaBands({
                   {group.accounts.map((account, index) => {
                     const file = account.entry.file;
                     const name = getQuotaDisplayName(file);
-                    const loading = account.status === 'loading';
+                    const loading = account.status === 'loading' || account.refreshing;
                     const canRefresh = !disableControls && !file.disabled && !loading;
 
                     return (

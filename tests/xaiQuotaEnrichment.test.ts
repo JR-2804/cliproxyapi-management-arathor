@@ -93,6 +93,20 @@ test('uses user tier when settings fails', async () => {
   expect(current().billing).toMatchObject({ planLabel: 'SuperGrok', planTier: 'premium' });
 });
 
+test('retains the quota request timestamp when optional enrichment replaces the snapshot', async () => {
+  apiCallApi.request = async () => result({ subscription_tier_display: 'SuperGrok Heavy' });
+  const data = billing();
+  const checkedAt = 1_800_000_000_000;
+  const state = { ...XAI_CONFIG.buildSuccessState(data), checkedAt };
+  useQuotaStore.getState().setXaiQuota({ [key]: state });
+
+  await enrichQuotaInBackground(adapter, file, data, state, i18n.t);
+
+  expect(current()).not.toBe(state);
+  expect(current()).toMatchObject({ checkedAt, status: 'success' });
+  expect(current().billing?.planLabel).toBe('SuperGrok Heavy');
+});
+
 for (const change of ['session', 'file', 'new-result', 'refresh'] as const) {
   test(`late subscription cannot overwrite ${change}`, async () => {
     const gate = deferred();

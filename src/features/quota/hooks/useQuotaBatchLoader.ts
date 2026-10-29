@@ -10,11 +10,12 @@
 
 import { useCallback, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { captureQuotaCacheGeneration, commitIfQuotaCacheCurrent } from '@/stores';
+import { captureQuotaCacheGeneration, commitIfQuotaCacheCurrent, useQuotaStore } from '@/stores';
 import { getStatusFromError } from '@/utils/quota';
 import { getQuotaCacheKey } from '@/utils/quota/identity';
 import type { QuotaFileEntry } from '../logic';
-import { QUOTA_ADAPTERS, getQuotaSetter, type QuotaCardState } from '../providers';
+import { QUOTA_ADAPTERS, getQuotaMap, getQuotaSetter, type QuotaCardState } from '../providers';
+import { isQuotaRequestPending } from '../autoRefresh';
 import { enrichQuotaInBackground } from '../quotaEnrichment';
 import type { QuotaProviderType } from '../providers/types';
 
@@ -29,18 +30,27 @@ interface BatchFetchResult {
 
 export function useQuotaBatchLoader() {
   const { t } = useTranslation();
-  const [batchLoading, setBatchLoading] = useState(false);
-  const loadingRef = useRef(false);
+  const session = useQuotaStore((state) => state.cacheGeneration);
+  const [batchState, setBatchState] = useState({ session, loading: false });
+  const loadingRef = useRef<number | null>(null);
   const requestIdRef = useRef(0);
 
   const loadQuota = useCallback(
-    async (targets: QuotaFileEntry[]) => {
-      if (loadingRef.current) return;
-      if (targets.length === 0) return;
-      loadingRef.current = true;
-      const requestId = ++requestIdRef.current;
+    async (targets: QuotaFileEntry[], options?: { background?: boolean }) => {
       const cacheGeneration = captureQuotaCacheGeneration();
-      setBatchLoading(true);
+      if (loadingRef.current === cacheGeneration.cacheGeneration) return;
+      targets = targets.filter(
+        (entry) =>
+          !entry.file.disabled &&
+          !isQuotaRequestPending(
+            getQuotaMap(QUOTA_ADAPTERS[entry.type])[getQuotaCacheKey(entry.file)]
+          )
+      );
+      if (targets.length === 0) return;
+      loadingRef.current = cacheGeneration.cacheGeneration;
+      const requestId = ++requestIdRef.current;
+      const checkedAt = Date.now();
+      setBatchState({ session: cacheGeneration.cacheGeneration, loading: true });
 
       try {
         const groups = new Map<QuotaProviderType, QuotaFileEntry[]>();
@@ -59,7 +69,12 @@ export function useQuotaBatchLoader() {
               setQuota((prev) => {
                 const nextState = { ...prev };
                 entries.forEach(({ file }) => {
-                  nextState[getQuotaCacheKey(file)] = adapter.buildLoadingState();
+                  const key = getQuotaCacheKey(file);
+                  const previous = prev[key];
+                  nextState[key] =
+                    options?.background && previous?.status === 'success'
+                      ? { ...previous, checkedAt, refreshing: true }
+                      : { ...adapter.buildLoadingState(), checkedAt };
                 });
                 return nextState;
               });
@@ -93,13 +108,15 @@ export function useQuotaBatchLoader() {
                 commitIfQuotaCacheCurrent(
                   cacheGeneration,
                   () => {
-                    nextState[result.cacheKey] =
-                      result.status === 'success'
+                    nextState[result.cacheKey] = {
+                      ...(result.status === 'success'
                         ? adapter.buildSuccessState(result.data)
                         : adapter.buildErrorState(
                             result.error || t('common.unknown_error'),
                             result.errorStatus
-                          );
+                          )),
+                      checkedAt,
+                    };
                     committedStates.set(result.cacheKey, nextState[result.cacheKey]);
                   },
                   result.name
@@ -117,13 +134,13 @@ export function useQuotaBatchLoader() {
         );
       } finally {
         if (requestId === requestIdRef.current) {
-          setBatchLoading(false);
-          loadingRef.current = false;
+          setBatchState({ session: cacheGeneration.cacheGeneration, loading: false });
+          loadingRef.current = null;
         }
       }
     },
     [t]
   );
 
-  return { batchLoading, loadQuota };
+  return { batchLoading: batchState.session === session && batchState.loading, loadQuota };
 }

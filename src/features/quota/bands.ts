@@ -18,6 +18,7 @@ export interface QuotaBandAccount {
   key: string;
   windows: QuotaBandWindow[];
   status: QuotaCardState['status'];
+  refreshing: boolean;
   stale: boolean;
   error?: string;
 }
@@ -97,6 +98,7 @@ function buildAccount(
     key: getQuotaCacheKey(entry.file),
     windows: windows.map((window) => buildWindow(window, status, now)),
     status,
+    refreshing: quota?.refreshing === true,
     stale: Boolean(state && 'stale' in state && state.stale),
     ...(state?.error ? { error: state.error } : {}),
   };

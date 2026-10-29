@@ -3,9 +3,7 @@ import { useQuotaStore } from '@/stores/useQuotaStore';
 import { getQuotaCacheKey } from '@/utils/quota/identity';
 import type { QuotaFileEntry } from '../../logic';
 
-/** Devin's active management query runs once per visible credential per visit.
- * Other providers retain their existing click-to-load behavior. No polling.
- */
+/** Devin's active management query runs once per visible credential per visit. */
 export function useDevinQuotaAutoLoad(
   entries: QuotaFileEntry[],
   disabled: boolean,
