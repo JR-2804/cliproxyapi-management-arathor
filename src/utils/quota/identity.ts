@@ -16,9 +16,10 @@ export function getQuotaCacheKey(file: AuthFileItem): string {
 
 /** Disambiguate same-name cards without ever falling back to account (a secret). */
 export function getQuotaDisplayName(file: AuthFileItem): string {
-  if (!isDevinFile(file) && !isPluginQuotaFile(file)) return file.name;
+  const displayName = file.note?.trim() || file.name;
+  if (!isDevinFile(file) && !isPluginQuotaFile(file)) return displayName;
   const identity = file.email?.trim() || normalizeRecentRequestAuthIndex(file.authIndex);
-  return identity ? `${file.name} · ${identity}` : file.name;
+  return identity ? `${displayName} · ${identity}` : displayName;
 }
 
 /** Resolve a cache identity back to the physical filename used by file mutations. */

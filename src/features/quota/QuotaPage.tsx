@@ -1,31 +1,33 @@
-/**
- * 额度查询页：提供商 tabs + 统一卡网格。
- *
- * 保留的行为契约（重设计不改）：
- * - 现有提供商保持点击加载；Devin 首次可见时主动查询一次，不轮询；
- * - cacheGeneration 会话隔离 + request-id 去重（见 useQuotaBatchLoader）；
- * - 文件列表变化后按 provider 剪枝额度缓存（已删文件不残留）；
- * - useHeaderRefresh 单槽位：本页唯一注册者，全局刷新 = 重取文件列表。
- */
-
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { authFilesApi } from '@/services/api';
+import { apiClient } from '@/services/api/client';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { Input } from '@/components/ui/Input';
+import { Modal } from '@/components/ui/Modal';
 import { IconSearch, IconX } from '@/components/ui/icons';
 import { Select } from '@/components/ui/Select';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { useHeaderRefresh } from '@/hooks/useHeaderRefresh';
 import { useNow } from '@/hooks/useNow';
 import { useRevealGroup } from '@/hooks/motion';
-import { useAuthStore, useQuotaStore, useThemeStore } from '@/stores';
+import { useAuthStore, useNotificationStore, useQuotaStore, useThemeStore } from '@/stores';
 import type { AuthFileItem, ResolvedTheme } from '@/types';
-import { getQuotaCacheKey } from '@/utils/quota/identity';
+import { getQuotaCacheKey, getQuotaDisplayName } from '@/utils/quota/identity';
 import { ProviderTabs } from '@/features/authFiles/components/ProviderTabs';
+import { notifyAuthFilesChanged } from '@/features/authFiles/authFilesEvents';
 import { QuotaHeader } from './components/QuotaHeader';
 import { QuotaCard } from './components/QuotaCard';
+import { QuotaBands } from './components/QuotaBands';
 import { QuotaTimeline } from './components/QuotaTimeline';
+import { buildQuotaBandGroups } from './bands';
+import {
+  moveQuotaAccount,
+  readQuotaAccountOrder,
+  sortQuotaAccountOrder,
+  writeQuotaAccountOrder,
+} from './accountOrder';
 import {
   CARD_ENTRANCE_BUDGET_MS,
   QUOTA_PAGE_SIZE,
@@ -56,15 +58,11 @@ import styles from './QuotaPage.module.scss';
 const TAB_IDS: string[] = ['all', ...QUOTA_TAB_ORDER];
 const SKELETON_CARD_COUNT = 6;
 
-/**
- * Existing providers display filenames; Devin's card and timeline share an
- * identity-aware display label. Keep the filename fallback stable for memoization.
- */
-const displayNameFor = (name: string) => name;
-
 export function QuotaPage() {
   const { t } = useTranslation();
   const connectionStatus = useAuthStore((state) => state.connectionStatus);
+  const apiBase = useAuthStore((state) => state.apiBase);
+  const confirmationOpen = useNotificationStore((state) => state.confirmation.isOpen);
   const resolvedTheme: ResolvedTheme = useThemeStore((state) => state.resolvedTheme);
 
   const [files, setFiles] = useState<AuthFileItem[]>([]);
@@ -72,8 +70,22 @@ export function QuotaPage() {
   const [error, setError] = useState('');
   const [tab, setTab] = useState<QuotaTabId>(() => readQuotaUiState()?.tab ?? 'all');
   const [sortMode, setSortMode] = useState<QuotaSortMode>(
-    () => readQuotaUiState()?.sortMode ?? 'default'
+    () => readQuotaUiState()?.sortMode ?? 'custom'
   );
+  const storedOrder = useMemo(() => readQuotaAccountOrder(apiBase), [apiBase]);
+  const [orderOverride, setOrderOverride] = useState<{ apiBase: string; order: string[] } | null>(
+    null
+  );
+  const accountOrder = orderOverride?.apiBase === apiBase ? orderOverride.order : storedOrder;
+  const [nameEditor, setNameEditor] = useState<{
+    file: AuthFileItem;
+    generation: number;
+    revision: number;
+  } | null>(null);
+  const [nameDraft, setNameDraft] = useState('');
+  const [nameSaving, setNameSaving] = useState(false);
+  const [nameError, setNameError] = useState('');
+  const [details, setDetails] = useState<{ key: string; generation: number } | null>(null);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -167,10 +179,9 @@ export function QuotaPage() {
 
   /* ---------- 归类 / 过滤 / 排序 / 分页 ---------- */
 
-  // 只在「最快恢复优先」下订阅分钟时钟。默认序下不门控的话，pageItems 每分钟
-  // 换一次身份，会反复空转下面那个「刷新全部」的 loading 下降沿 effect。
-  const tick = useNow(sortMode !== 'default');
-  const sortNow = sortMode === 'default' ? 0 : tick;
+  // Bands and recovery sorting share one clock; the default order stays stable.
+  const tick = useNow(true);
+  const sortNow = sortMode === 'soonest' ? tick : 0;
 
   const entries = useMemo(() => classifyQuotaFiles(files), [files]);
   const tabCounts = useMemo(() => buildTabCounts(entries), [entries]);
@@ -189,8 +200,11 @@ export function QuotaPage() {
   );
   // 排序在分页之前：否则「最快恢复」只在当前页内成立。
   const sortedEntries = useMemo(
-    () => sortQuotaEntries(filteredEntries, sortMode, resolveNextRecovery),
-    [filteredEntries, sortMode, resolveNextRecovery]
+    () =>
+      sortMode === 'custom'
+        ? sortQuotaAccountOrder(filteredEntries, accountOrder)
+        : sortQuotaEntries(filteredEntries, sortMode, resolveNextRecovery),
+    [filteredEntries, sortMode, resolveNextRecovery, accountOrder]
   );
 
   const { pageItems, currentPage, totalPages } = useMemo(
@@ -301,6 +315,98 @@ export function QuotaPage() {
 
   const canUseActions = !disableControls && !loading && filesGeneration === sessionGeneration;
 
+  const bandGroups = useMemo(
+    () => buildQuotaBandGroups(pageItems, getQuota, tick),
+    [pageItems, getQuota, tick]
+  );
+  const otherEntries = pageItems.filter(
+    (entry) => entry.type !== 'claude' && entry.type !== 'codex'
+  );
+  const detailsEntry =
+    details?.generation === sessionGeneration
+      ? entries.find((entry) => getQuotaCacheKey(entry.file) === details.key)
+      : undefined;
+  const nameEditorOpen = nameEditor !== null && nameEditor.generation === sessionGeneration;
+
+  const handleRename = (file: AuthFileItem) => {
+    if (!canUseActions || file.runtimeOnly === true) return;
+    setNameEditor({
+      file,
+      generation: sessionGeneration,
+      revision: apiClient.getConnectionRevision(),
+    });
+    setNameDraft(file.note ?? '');
+    setNameError('');
+    setNameSaving(false);
+  };
+
+  const handleSaveName = async () => {
+    if (!nameEditor || !nameEditorOpen || nameSaving || !canUseActions) return;
+    const editor = nameEditor;
+    const isCurrent = () =>
+      editor.generation === useQuotaStore.getState().cacheGeneration &&
+      editor.revision === apiClient.getConnectionRevision();
+    if (!isCurrent()) return;
+    const note = nameDraft.trim();
+    setNameSaving(true);
+    setNameError('');
+    try {
+      await authFilesApi.patchFields(editor.file.name, { note });
+      if (!isCurrent()) return;
+      setFiles((current) =>
+        current.map((file) => (file.name === editor.file.name ? { ...file, note } : file))
+      );
+      notifyAuthFilesChanged();
+      setNameEditor(null);
+      await loadFiles();
+    } catch (err: unknown) {
+      if (!isCurrent()) return;
+      setNameError(
+        `${t('quota_management.bands_name_failed')}: ${
+          err instanceof Error ? err.message : t('common.unknown_error')
+        }`
+      );
+    } finally {
+      if (isCurrent()) setNameSaving(false);
+    }
+  };
+
+  const saveOrder = (order: string[]) => {
+    if (!canUseActions || sortMode !== 'custom') return;
+    setOrderOverride({ apiBase, order });
+    writeQuotaAccountOrder(apiBase, order);
+  };
+
+  const handleReorder = (sourceKey: string, targetKey: string) => {
+    saveOrder(moveQuotaAccount(entries, accountOrder, sourceKey, targetKey));
+  };
+
+  const handleMove = (key: string, direction: -1 | 1) => {
+    const entry = pageItems.find((item) => getQuotaCacheKey(item.file) === key);
+    if (!entry) return;
+    const siblings = pageItems.filter((item) => item.type === entry.type);
+    const index = siblings.findIndex((item) => getQuotaCacheKey(item.file) === key);
+    const target = siblings[index + direction];
+    if (!target) return;
+    saveOrder(
+      moveQuotaAccount(
+        entries,
+        accountOrder,
+        key,
+        getQuotaCacheKey(target.file),
+        direction > 0 ? 'after' : 'before'
+      )
+    );
+  };
+
+  const displayNameFor = useCallback(
+    (name: string) => {
+      const file = files.find((item) => item.name === name);
+      return file ? getQuotaDisplayName(file) : name;
+    },
+    [files]
+  );
+
   /* ---------- 首屏卡片一次性级联入场 ----------
    * 首批数据渲染后立即翻转 cardsAnimated；已挂载的卡片在挂载时捕获过自己的
    * 延迟（QuotaCard 内 useState 初始化），后续切 tab/翻页/刷新新挂载的卡片
@@ -383,6 +489,9 @@ export function QuotaPage() {
             />
           </div>
         </div>
+        {sortMode === 'custom' && (
+          <p className={styles.orderHint}>{t('quota_management.bands_order_hint')}</p>
+        )}
 
         {error && (
           <div className={styles.errorBanner} role="alert">
@@ -425,21 +534,39 @@ export function QuotaPage() {
             }
           />
         ) : (
-          <div className={styles.grid}>
-            {pageItems.map((entry, index) => (
-              <QuotaCard
-                key={`${entry.type}:${getQuotaCacheKey(entry.file)}`}
-                entry={entry}
-                quota={getQuota(entry)}
-                resolvedTheme={resolvedTheme}
-                canRefresh={canUseActions && !entry.file.disabled}
-                resetting={resettingQuotaName === getQuotaCacheKey(entry.file)}
-                entranceDelayMs={cardEntranceDelay(index)}
-                onRefresh={() => void refreshQuota(entry.file, QUOTA_ADAPTERS[entry.type])}
-                onReset={() => resetQuota(entry.file, QUOTA_ADAPTERS[entry.type])}
-              />
-            ))}
-          </div>
+          <>
+            <QuotaBands
+              groups={bandGroups}
+              now={tick}
+              resolvedTheme={resolvedTheme}
+              disableControls={!canUseActions}
+              manualOrder={sortMode === 'custom'}
+              onRename={handleRename}
+              onReorder={handleReorder}
+              onMove={handleMove}
+              onRefresh={(entry) => void refreshQuota(entry.file, QUOTA_ADAPTERS[entry.type])}
+              onDetails={(entry) =>
+                setDetails({ key: getQuotaCacheKey(entry.file), generation: sessionGeneration })
+              }
+            />
+            {otherEntries.length > 0 && (
+              <div className={styles.grid}>
+                {otherEntries.map((entry, index) => (
+                  <QuotaCard
+                    key={`${entry.type}:${getQuotaCacheKey(entry.file)}`}
+                    entry={entry}
+                    quota={getQuota(entry)}
+                    resolvedTheme={resolvedTheme}
+                    canRefresh={canUseActions && !entry.file.disabled}
+                    resetting={resettingQuotaName === getQuotaCacheKey(entry.file)}
+                    entranceDelayMs={cardEntranceDelay(index)}
+                    onRefresh={() => void refreshQuota(entry.file, QUOTA_ADAPTERS[entry.type])}
+                    onReset={() => resetQuota(entry.file, QUOTA_ADAPTERS[entry.type])}
+                  />
+                ))}
+              </div>
+            )}
+          </>
         )}
 
         {!loading && filteredEntries.length > QUOTA_PAGE_SIZE && (
@@ -478,6 +605,68 @@ export function QuotaPage() {
           resolvedTheme={resolvedTheme}
         />
       </section>
+      <Modal
+        open={nameEditorOpen}
+        title={t('quota_management.bands_name_title')}
+        onClose={() => setNameEditor(null)}
+        closeDisabled={nameSaving}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setNameEditor(null)} disabled={nameSaving}>
+              {t('common.cancel')}
+            </Button>
+            <Button
+              onClick={() => void handleSaveName()}
+              disabled={!canUseActions || nameSaving}
+              loading={nameSaving}
+            >
+              {t('common.save')}
+            </Button>
+          </>
+        }
+      >
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            void handleSaveName();
+          }}
+        >
+          <Input
+            label={t('quota_management.bands_name_label')}
+            hint={t('quota_management.bands_name_hint')}
+            value={nameDraft}
+            onChange={(event) => setNameDraft(event.target.value)}
+            disabled={nameSaving}
+            maxLength={200}
+            error={nameError}
+            autoFocus
+          />
+        </form>
+      </Modal>
+      <Modal
+        open={Boolean(detailsEntry)}
+        title={t('quota_management.bands_details_title')}
+        onClose={() => setDetails(null)}
+        closeDisabled={
+          confirmationOpen ||
+          Boolean(detailsEntry && resettingQuotaName === getQuotaCacheKey(detailsEntry.file))
+        }
+      >
+        {detailsEntry && (
+          <QuotaCard
+            key={getQuotaCacheKey(detailsEntry.file)}
+            entry={detailsEntry}
+            quota={getQuota(detailsEntry)}
+            resolvedTheme={resolvedTheme}
+            canRefresh={canUseActions && !detailsEntry.file.disabled}
+            resetting={resettingQuotaName === getQuotaCacheKey(detailsEntry.file)}
+            onRefresh={() =>
+              void refreshQuota(detailsEntry.file, QUOTA_ADAPTERS[detailsEntry.type])
+            }
+            onReset={() => resetQuota(detailsEntry.file, QUOTA_ADAPTERS[detailsEntry.type])}
+          />
+        )}
+      </Modal>
     </div>
   );
 }

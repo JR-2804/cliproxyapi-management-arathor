@@ -196,6 +196,12 @@
 
 /* ---------- 分页 ---------- */
 
+.orderHint {
+  margin: -6px 0 0;
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+
 .pagination {
   display: flex;
   align-items: center;
