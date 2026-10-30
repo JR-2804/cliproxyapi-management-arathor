@@ -29,7 +29,6 @@ import {
   writeQuotaAccountOrder,
 } from './accountOrder';
 import {
-  CARD_ENTRANCE_BUDGET_MS,
   QUOTA_PAGE_SIZE,
   QUOTA_SORT_MODES,
   QUOTA_TAB_ORDER,
@@ -333,9 +332,6 @@ export function QuotaPage() {
     () => buildQuotaBandGroups(pageItems, getQuota, tick),
     [pageItems, getQuota, tick]
   );
-  const otherEntries = pageItems.filter(
-    (entry) => entry.type !== 'claude' && entry.type !== 'codex'
-  );
   const detailsEntry =
     details?.generation === sessionGeneration
       ? entries.find((entry) => getQuotaCacheKey(entry.file) === details.key)
@@ -420,24 +416,6 @@ export function QuotaPage() {
     },
     [files]
   );
-
-  /* ---------- 首屏卡片一次性级联入场 ----------
-   * 首批数据渲染后立即翻转 cardsAnimated；已挂载的卡片在挂载时捕获过自己的
-   * 延迟（QuotaCard 内 useState 初始化），后续切 tab/翻页/刷新新挂载的卡片
-   * 拿到 null —— 不重播。 */
-
-  const [cardsAnimated, setCardsAnimated] = useState(false);
-  const enableCardEntrance = !cardsAnimated && !loading && pageItems.length > 0;
-  useEffect(() => {
-    if (enableCardEntrance) {
-      setCardsAnimated(true);
-    }
-  }, [enableCardEntrance]);
-  const cardEntranceDelay = (index: number): number | null => {
-    if (!enableCardEntrance) return null;
-    if (pageItems.length <= 1) return 0;
-    return Math.round((index / (pageItems.length - 1)) * CARD_ENTRANCE_BUDGET_MS);
-  };
 
   /* ---------- 渲染 ---------- */
 
@@ -548,39 +526,20 @@ export function QuotaPage() {
             }
           />
         ) : (
-          <>
-            <QuotaBands
-              groups={bandGroups}
-              now={tick}
-              resolvedTheme={resolvedTheme}
-              disableControls={!canUseActions}
-              manualOrder={sortMode === 'custom'}
-              onRename={handleRename}
-              onReorder={handleReorder}
-              onMove={handleMove}
-              onRefresh={(entry) => void refreshQuota(entry.file, QUOTA_ADAPTERS[entry.type])}
-              onDetails={(entry) =>
-                setDetails({ key: getQuotaCacheKey(entry.file), generation: sessionGeneration })
-              }
-            />
-            {otherEntries.length > 0 && (
-              <div className={styles.grid}>
-                {otherEntries.map((entry, index) => (
-                  <QuotaCard
-                    key={`${entry.type}:${getQuotaCacheKey(entry.file)}`}
-                    entry={entry}
-                    quota={getQuota(entry)}
-                    resolvedTheme={resolvedTheme}
-                    canRefresh={canUseActions && !entry.file.disabled}
-                    resetting={resettingQuotaName === getQuotaCacheKey(entry.file)}
-                    entranceDelayMs={cardEntranceDelay(index)}
-                    onRefresh={() => void refreshQuota(entry.file, QUOTA_ADAPTERS[entry.type])}
-                    onReset={() => resetQuota(entry.file, QUOTA_ADAPTERS[entry.type])}
-                  />
-                ))}
-              </div>
-            )}
-          </>
+          <QuotaBands
+            groups={bandGroups}
+            now={tick}
+            resolvedTheme={resolvedTheme}
+            disableControls={!canUseActions}
+            manualOrder={sortMode === 'custom'}
+            onRename={handleRename}
+            onReorder={handleReorder}
+            onMove={handleMove}
+            onRefresh={(entry) => void refreshQuota(entry.file, QUOTA_ADAPTERS[entry.type])}
+            onDetails={(entry) =>
+              setDetails({ key: getQuotaCacheKey(entry.file), generation: sessionGeneration })
+            }
+          />
         )}
 
         {!loading && filteredEntries.length > QUOTA_PAGE_SIZE && (

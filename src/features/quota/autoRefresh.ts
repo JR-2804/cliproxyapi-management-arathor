@@ -3,6 +3,16 @@ import type { QuotaCardState } from './providers';
 
 export const QUOTA_AUTO_REFRESH_MS = 60_000;
 
+/**
+ * Providers whose quota lookup is a read with no side effects. Meta's lookup posts to the key
+ * endpoint, which returns the existing key rather than issuing a new one.
+ */
+const AUTO_REFRESH_TYPES: ReadonlySet<QuotaFileEntry['type']> = new Set([
+  'claude',
+  'codex',
+  'meta',
+]);
+
 export const isQuotaRequestPending = (quota: QuotaCardState | undefined): boolean =>
   quota?.status === 'loading' || quota?.refreshing === true;
 
@@ -12,7 +22,7 @@ export function selectAutomaticQuotaTargets(
   now: number
 ): QuotaFileEntry[] {
   return entries.filter((entry) => {
-    if ((entry.type !== 'claude' && entry.type !== 'codex') || entry.file.disabled) return false;
+    if (!AUTO_REFRESH_TYPES.has(entry.type) || entry.file.disabled) return false;
     const quota = getQuota(entry);
     if (isQuotaRequestPending(quota)) return false;
     return (

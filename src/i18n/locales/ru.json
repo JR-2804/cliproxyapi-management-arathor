@@ -1618,6 +1618,7 @@
     "bands_name_failed": "Не удалось сохранить название аккаунта",
     "bands_order_hint": "Свой порядок сохраняется в этом браузере отдельно для каждого сервера.",
     "bands_details_title": "Сведения об аккаунте",
+    "bands_quota": "Квота",
     "meta_credentials": "{{count}} учётных данных",
     "meta_loaded": "{{count}} загружено",
     "meta_attention": "{{count}} требуют внимания",

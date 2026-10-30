@@ -1615,6 +1615,7 @@
     "bands_name_failed": "Could not save the account name",
     "bands_order_hint": "Custom order is saved in this browser for this server.",
     "bands_details_title": "Account details",
+    "bands_quota": "Quota",
     "meta_credentials": "{{count}} credentials",
     "meta_loaded": "{{count}} loaded",
     "meta_attention": "{{count}} need attention",

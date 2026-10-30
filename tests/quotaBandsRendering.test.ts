@@ -123,4 +123,37 @@ describe('QuotaBands rendering', () => {
       new RegExp(`disabled="" aria-label="${renameLabel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"`)
     );
   });
+
+  test('gives Muse and plugin accounts the same band controls as Claude and Codex', () => {
+    const otherEntries: QuotaFileEntry[] = [
+      { type: 'meta', file: { name: 'Muse', type: 'meta' } },
+      { type: 'plugin', file: { name: 'Plugin', type: 'plugin' } },
+    ];
+    const muse: QuotaCardState = {
+      status: 'success',
+      data: {
+        windows: [
+          { id: 'window', usedPercent: 7, resetAt: resetAtMs / 1000, durationMinutes: 300 },
+        ],
+      },
+    } as QuotaCardState;
+    const markup = renderBands(
+      propsFor(() => undefined, {
+        groups: buildQuotaBandGroups(
+          otherEntries,
+          (entry) => (entry.type === 'meta' ? muse : undefined),
+          now
+        ),
+      })
+    );
+
+    for (const name of ['Muse', 'Plugin']) {
+      expect(markup).toContain(english.t('quota_management.bands_rename', { name }));
+      expect(markup).toContain(english.t('quota_management.bands_refresh', { name }));
+      expect(markup).toContain(english.t('quota_management.bands_details', { name }));
+    }
+    expect(markup).toContain(english.t('meta_quota.window_duration_hours', { hours: 5 }));
+    expect(markup).toContain('width:93%');
+    expect(markup).toContain(english.t('quota_management.bands_quota'));
+  });
 });

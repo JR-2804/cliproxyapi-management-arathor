@@ -1614,6 +1614,7 @@
     "bands_name_failed": "无法保存账号名称",
     "bands_order_hint": "自定义顺序按服务器保存在此浏览器中。",
     "bands_details_title": "账号详情",
+    "bands_quota": "额度",
     "meta_credentials": "{{count}} 个凭证",
     "meta_loaded": "{{count}} 个已加载",
     "meta_attention": "{{count}} 个需关注",

@@ -104,7 +104,7 @@ export function QuotaBands({
       {groups.map((group) => {
         const providerName = getTypeLabel(t, group.type);
         const providerIcon = getAuthFileIcon(group.type, resolvedTheme);
-        const colors = TYPE_COLORS[group.type];
+        const colors = TYPE_COLORS[group.type] || TYPE_COLORS.unknown;
         const color = resolvedTheme === 'dark' && colors.dark ? colors.dark : colors.light;
         const groupStyle = {
           '--account-count': group.accounts.length,

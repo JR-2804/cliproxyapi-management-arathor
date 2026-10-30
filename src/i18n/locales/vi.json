@@ -1566,6 +1566,7 @@
     "bands_name_failed": "Không thể lưu tên tài khoản",
     "bands_order_hint": "Thứ tự tùy chỉnh được lưu trong trình duyệt này cho từng máy chủ.",
     "bands_details_title": "Chi tiết tài khoản",
+    "bands_quota": "Hạn mức",
     "meta_credentials": "{{count}} credential",
     "meta_loaded": "{{count}} đã tải",
     "meta_attention": "{{count}} cần chú ý",

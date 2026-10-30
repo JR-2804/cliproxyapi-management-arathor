@@ -23,8 +23,8 @@ afterEach(() => {
 });
 
 describe('automatic quota refresh selection', () => {
-  test('loads visible Claude and Codex accounts without a prior quota request', () => {
-    const entries = [entry('claude'), entry('codex', 'codex')];
+  test('loads visible Claude, Codex and Muse accounts without a prior quota request', () => {
+    const entries = [entry('claude'), entry('codex', 'codex'), entry('meta', 'meta')];
     expect(targets(entries)).toEqual(entries);
     expect(targets(entries, { claude: { status: 'success' } })).toEqual(entries);
     expect(targets(entries, { claude: { status: 'idle' } })).toEqual(entries);
@@ -34,15 +34,16 @@ describe('automatic quota refresh selection', () => {
     const input = [
       entry('claude'),
       entry('codex', 'codex'),
+      entry('meta', 'meta'),
       entry('off', 'claude', true),
+      entry('meta-off', 'meta', true),
       entry('antigravity', 'antigravity'),
       entry('devin', 'devin'),
       entry('kimi', 'kimi'),
-      entry('meta', 'meta'),
       entry('plugin', 'plugin'),
       entry('xai', 'xai'),
     ];
-    expect(targets(input)).toEqual(input.slice(0, 2));
+    expect(targets(input)).toEqual(input.slice(0, 3));
   });
 
   test('respects the minute boundary for results from either manual or automatic requests', () => {

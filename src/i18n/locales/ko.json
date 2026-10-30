@@ -1615,6 +1615,7 @@
     "bands_name_failed": "계정 이름을 저장할 수 없습니다",
     "bands_order_hint": "사용자 지정 순서는 이 브라우저에 서버별로 저장됩니다.",
     "bands_details_title": "계정 상세 정보",
+    "bands_quota": "할당량",
     "meta_credentials": "자격 증명 {{count}}개",
     "meta_loaded": "{{count}}개 로드됨",
     "meta_attention": "{{count}}개 주의 필요",
